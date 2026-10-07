@@ -119,3 +119,50 @@ def test_plan_meals_validates_claude_output(monkeypatch):
         llm.PlannedMeal(day="Monday", recipe_id=99, new_dish="", reason="r")]))
     with pytest.raises(llm.LLMError):
         llm.plan_meals(["Monday"], "", catalog)
+
+
+def test_delete_and_restore_recipe(client):
+    plan = client.post("/api/plans", json={"days": ["Monday"], "prompt": ""}).json()
+    used = plan["meals"][0]["recipe"]
+    total = len(client.get("/api/recipes").json())
+
+    assert client.delete(f"/api/recipes/{used['id']}").status_code == 200
+    ids = {r["id"] for r in client.get("/api/recipes").json()}
+    assert used["id"] not in ids and len(ids) == total - 1
+    # Old plans still show the deleted recipe and its shopping list.
+    assert client.get(f"/api/plans/{plan['id']}").json()["meals"][0]["recipe"]["title"] == used["title"]
+    assert client.get(f"/api/plans/{plan['id']}/shopping-list").status_code == 200
+    # The planner never picks it again.
+    for _ in range(5):
+        p = client.post("/api/plans", json={"days": ["Monday", "Tuesday", "Wednesday"]}).json()
+        assert used["id"] not in {m["recipe"]["id"] for m in p["meals"]}
+    assert client.delete(f"/api/recipes/{used['id']}").status_code == 404
+
+    assert client.post(f"/api/recipes/{used['id']}/restore").status_code == 200
+    assert len(client.get("/api/recipes").json()) == total
+
+
+def test_history_list_and_delete(client):
+    first = client.post("/api/plans", json={"days": ["Monday", "Friday"], "prompt": "veggie"}).json()
+    second = client.post("/api/plans", json={"days": ["Tuesday"]}).json()
+    history = client.get("/api/plans").json()
+    assert [p["id"] for p in history] == [second["id"], first["id"]]
+    assert history[1]["prompt"] == "veggie"
+    assert [m["day"] for m in history[1]["meals"]] == ["Monday", "Friday"]
+    assert history[1]["meals"][0]["title"] == first["meals"][0]["recipe"]["title"]
+
+    assert client.delete(f"/api/plans/{second['id']}").status_code == 200
+    assert [p["id"] for p in client.get("/api/plans").json()] == [first["id"]]
+    assert client.get("/api/plans/latest").json()["id"] == first["id"]
+    assert client.delete(f"/api/plans/{second['id']}").status_code == 404
+
+
+def test_migrates_old_database(tmp_path, monkeypatch):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old_schema = db.SCHEMA.replace("    deleted INTEGER NOT NULL DEFAULT 0,\n", "")
+    assert "deleted" not in old_schema
+    sqlite3.connect(path).executescript(old_schema)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    db.init_db()
+    assert len(db.list_recipes()) >= 40

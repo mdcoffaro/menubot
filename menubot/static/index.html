@@ -16,6 +16,7 @@
 
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="week" class="active">This week</button>
+    <button role="tab" data-tab="history">History</button>
     <button role="tab" data-tab="recipes">Recipes</button>
   </nav>
 
@@ -61,10 +62,40 @@
           <button id="back-to-plan" class="ghost">Back to meals</button>
         </div>
         <div class="row gap">
-          <button id="copy-list" class="ghost">Copy as text</button>
+          <button id="copy-list" class="ghost copy-list">Copy as text</button>
           <button id="share-list" class="ghost" hidden>Share</button>
         </div>
         <div id="shopping"></div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY ============ -->
+    <section id="tab-history" hidden>
+      <div id="history-list"></div>
+
+      <div id="history-detail" hidden>
+        <div class="plan-head">
+          <div>
+            <h2 id="history-title"></h2>
+            <p id="history-sub" class="muted"></p>
+          </div>
+          <button class="ghost history-back">All menus</button>
+        </div>
+        <p id="history-prompt" class="quote"></p>
+        <div id="history-meals"></div>
+        <button id="history-to-shopping" class="primary big">Shopping list</button>
+        <button id="history-delete" class="link danger center-block">Delete this menu</button>
+      </div>
+
+      <div id="history-shopping" hidden>
+        <div class="plan-head">
+          <h2>Shopping list</h2>
+          <button id="history-shopping-back" class="ghost">Back to menu</button>
+        </div>
+        <div class="row gap">
+          <button class="ghost copy-list">Copy as text</button>
+        </div>
+        <div class="shopping-root"></div>
       </div>
     </section>
 
@@ -87,7 +118,7 @@
     </section>
   </main>
 
-  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="toast" role="status" aria-live="polite"><span></span><button type="button" hidden></button></div>
 
   <template id="meal-tpl">
     <article class="meal card">

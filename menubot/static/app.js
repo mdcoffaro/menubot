@@ -17,13 +17,21 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function toast(msg) {
-  const t = $("#toast");
-  t.textContent = msg;
+function toast(msg, action) {
+  const t = $("#toast"), btn = $("button", t);
+  $("span", t).textContent = msg;
+  btn.hidden = !action;
+  btn.onclick = null;
+  if (action) {
+    btn.textContent = action.label;
+    btn.onclick = () => { t.classList.remove("show"); action.run(); };
+  }
   t.classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove("show"), 3200);
+  toast.timer = setTimeout(() => t.classList.remove("show"), action ? 6000 : 3200);
 }
+
+const parseDate = (s) => new Date(s.replace(" ", "T") + "Z");  // SQLite stores UTC
 
 function store(key, value) {
   try {
@@ -76,9 +84,9 @@ const metaLine = (r) => [`${r.total_minutes} min`, r.cuisine, r.protein].filter(
 // ---------- tabs ----------
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => {
   $$(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
-  $("#tab-week").hidden = b.dataset.tab !== "week";
-  $("#tab-recipes").hidden = b.dataset.tab !== "recipes";
+  for (const tab of ["week", "history", "recipes"]) $(`#tab-${tab}`).hidden = b.dataset.tab !== tab;
   if (b.dataset.tab === "recipes") loadRecipes();
+  if (b.dataset.tab === "history") showHistoryList();
 }));
 
 // ---------- plan form ----------
@@ -198,17 +206,19 @@ let shoppingText = "";
 async function showShopping() {
   const list = await api(`/api/plans/${plan.id}/shopping-list`).catch((e) => toast(e.message));
   if (!list) return;
-  shoppingText = list.text;
   $("#plan-view").hidden = true;
   $("#shopping-view").hidden = false;
   $("#share-list").hidden = !navigator.share;
+  renderShopping(list, $("#shopping"), plan.id);
+}
 
-  const key = `menubot.checked.${plan.id}`;
+function renderShopping(list, root, planId) {
+  shoppingText = list.text;
+  const key = `menubot.checked.${planId}`;
   const checked = new Set(store(key) || []);
   const groups = [...list.aisles.map((g) => [g.aisle, g.items])];
   if (list.staples.length) groups.push(["Check the pantry", list.staples]);
 
-  const root = $("#shopping");
   root.innerHTML = "";
   for (const [name, items] of groups) {
     const card = document.createElement("div");
@@ -237,10 +247,10 @@ async function showShopping() {
   }
 }
 
-$("#copy-list").addEventListener("click", async () => {
+$$(".copy-list").forEach((b) => b.addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(shoppingText); toast("Copied!"); }
   catch { toast("Couldn't copy. Long-press to select instead."); }
-});
+}));
 $("#share-list").addEventListener("click", () => navigator.share({ title: "Grocery list", text: shoppingText }).catch(() => {}));
 
 // ---------- recipes tab ----------
@@ -293,22 +303,117 @@ function renderRecipes() {
       if (e.target.closest("a, button")) return;
       if (!details.innerHTML) {
         details.innerHTML = recipeDetails(r);
-        if (r.source !== "seed") {
-          const del = document.createElement("button");
-          del.className = "link danger"; del.textContent = "Delete recipe";
-          del.addEventListener("click", async () => {
-            if (!confirm(`Delete “${r.title}”?`)) return;
-            try { await api(`/api/recipes/${r.id}`, { method: "DELETE" }); await loadRecipes(true); }
-            catch (err) { toast(err.message); }
-          });
-          details.append(del);
-        }
+        const del = document.createElement("button");
+        del.className = "link danger"; del.textContent = "Delete recipe";
+        del.addEventListener("click", () => deleteRecipe(r));
+        details.append(del);
       }
       details.hidden = !details.hidden;
     });
     list.append(card);
   }
 }
+
+async function deleteRecipe(r) {
+  try {
+    await api(`/api/recipes/${r.id}`, { method: "DELETE" });
+    await loadRecipes(true);
+    toast(`Deleted “${r.title}”`, {
+      label: "Undo",
+      run: async () => {
+        try { await api(`/api/recipes/${r.id}/restore`, { method: "POST" }); await loadRecipes(true); toast("Restored"); }
+        catch (err) { toast(err.message); }
+      },
+    });
+  } catch (err) { toast(err.message); }
+}
+
+// ---------- history tab ----------
+let historyPlan = null;
+
+function showHistoryPane(id) {
+  for (const pane of ["#history-list", "#history-detail", "#history-shopping"]) $(pane).hidden = pane !== id;
+  window.scrollTo(0, 0);
+}
+
+async function showHistoryList() {
+  showHistoryPane("#history-list");
+  const root = $("#history-list");
+  const plans = await api("/api/plans").catch((e) => { toast(e.message); return null; });
+  if (!plans) return;
+  root.innerHTML = plans.length ? "" : `<p class="empty">No menus yet. Plan your first week on the “This week” tab.</p>`;
+  plans.forEach((p, idx) => {
+    const card = document.createElement("article");
+    card.className = "card history-item";
+    card.innerHTML = `<div class="head"><h3></h3><span class="badge" hidden>Current</span></div>
+      <p class="muted"></p><ul></ul><p class="quote" hidden></p>`;
+    $("h3", card).textContent = "Week of " + parseDate(p.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    $(".badge", card).hidden = idx !== 0;
+    const approved = p.meals.filter((m) => m.approved).length;
+    $(".muted", card).textContent = `${p.meals.length} dinners · ${p.servings} servings · ${approved}/${p.meals.length} approved`;
+    for (const m of p.meals) {
+      const li = document.createElement("li");
+      li.innerHTML = "<b></b><span></span>";
+      $("b", li).textContent = m.day.slice(0, 3);
+      $("span", li).textContent = m.title;
+      $("ul", card).append(li);
+    }
+    if (p.prompt) { $(".quote", card).hidden = false; $(".quote", card).textContent = p.prompt; }
+    card.addEventListener("click", () => openHistoryPlan(p.id));
+    root.append(card);
+  });
+}
+
+async function openHistoryPlan(id) {
+  historyPlan = await api(`/api/plans/${id}`).catch((e) => { toast(e.message); return null; });
+  if (!historyPlan) return;
+  const date = parseDate(historyPlan.created_at);
+  $("#history-title").textContent = "Week of " + date.toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  $("#history-sub").textContent = `Planned ${date.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${historyPlan.servings} servings each`;
+  $("#history-prompt").textContent = historyPlan.prompt;
+  $("#history-prompt").hidden = !historyPlan.prompt;
+  const root = $("#history-meals");
+  root.innerHTML = "";
+  for (const meal of historyPlan.meals) {
+    const card = document.createElement("article");
+    card.className = "meal card" + (meal.approved ? " approved" : "");
+    card.innerHTML = `<div class="meal-top"><span class="day"></span><span class="check">✓</span></div>
+      <h3 class="title"></h3><p class="meta muted"></p>
+      <div class="actions"><button class="details-btn link">Recipe</button></div><div class="details" hidden></div>`;
+    $(".day", card).textContent = meal.day;
+    $(".title", card).textContent = meal.recipe.title;
+    $(".meta", card).textContent = metaLine(meal.recipe);
+    const details = $(".details", card);
+    details.innerHTML = recipeDetails(meal.recipe, historyPlan.servings);
+    $(".details-btn", card).addEventListener("click", (e) => {
+      details.hidden = !details.hidden;
+      e.target.textContent = details.hidden ? "Recipe" : "Hide";
+    });
+    root.append(card);
+  }
+  showHistoryPane("#history-detail");
+}
+
+$$(".history-back").forEach((b) => b.addEventListener("click", showHistoryList));
+$("#history-shopping-back").addEventListener("click", () => showHistoryPane("#history-detail"));
+$("#history-to-shopping").addEventListener("click", async () => {
+  const list = await api(`/api/plans/${historyPlan.id}/shopping-list`).catch((e) => toast(e.message));
+  if (!list) return;
+  renderShopping(list, $("#history-shopping .shopping-root"), historyPlan.id);
+  showHistoryPane("#history-shopping");
+});
+$("#history-delete").addEventListener("click", async () => {
+  if (!confirm("Delete this menu from your history?")) return;
+  try {
+    await api(`/api/plans/${historyPlan.id}`, { method: "DELETE" });
+    if (plan?.id === historyPlan.id) {
+      plan = await api("/api/plans/latest").catch(() => null);
+      if (plan) showPlan(); else { $("#plan-view").hidden = $("#shopping-view").hidden = true; $("#plan-form").hidden = false; }
+    }
+    toast("Menu deleted");
+    showHistoryList();
+  } catch (err) { toast(err.message); }
+});
 
 // ---------- boot ----------
 (async function init() {

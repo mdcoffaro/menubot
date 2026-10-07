@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS recipes (
     steps TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'seed',
     source_url TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS plans (
@@ -60,6 +61,10 @@ def connect():
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # Databases created before recipe deletion existed lack this column.
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(recipes)")}
+        if "deleted" not in columns:
+            conn.execute("ALTER TABLE recipes ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
         (count,) = conn.execute("SELECT COUNT(*) FROM recipes").fetchone()
     if count == 0:
         from .seed_data import SEED
@@ -74,6 +79,7 @@ def _row_to_recipe(row: sqlite3.Row) -> Recipe:
     for key in ("tags", "ingredients", "steps"):
         d[key] = json.loads(d[key])
     d.pop("created_at", None)
+    d.pop("deleted", None)
     return Recipe(**d)
 
 
@@ -95,6 +101,7 @@ def add_recipe(recipe: RecipeIn, source: str) -> Recipe:
 
 
 def get_recipe(recipe_id: int) -> Recipe | None:
+    """Also returns deleted recipes, so old plans still show what was cooked."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
     return _row_to_recipe(row) if row else None
@@ -102,16 +109,26 @@ def get_recipe(recipe_id: int) -> Recipe | None:
 
 def list_recipes() -> list[Recipe]:
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM recipes ORDER BY title COLLATE NOCASE").fetchall()
+        rows = conn.execute("SELECT * FROM recipes WHERE deleted = 0 ORDER BY title COLLATE NOCASE").fetchall()
     return [_row_to_recipe(r) for r in rows]
 
 
 def delete_recipe(recipe_id: int) -> bool:
+    """Soft delete: the recipe disappears from the catalog and the planner, but plans that
+    used it keep working."""
+    return _set_deleted(recipe_id, True)
+
+
+def restore_recipe(recipe_id: int) -> bool:
+    return _set_deleted(recipe_id, False)
+
+
+def _set_deleted(recipe_id: int, deleted: bool) -> bool:
     with connect() as conn:
-        in_use = conn.execute("SELECT 1 FROM plan_meals WHERE recipe_id = ? LIMIT 1", (recipe_id,)).fetchone()
-        if in_use:
-            raise ValueError("Recipe is part of a saved plan")
-        cur = conn.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
+        cur = conn.execute(
+            "UPDATE recipes SET deleted = ? WHERE id = ? AND deleted = ?",
+            (int(deleted), recipe_id, int(not deleted)),
+        )
     return cur.rowcount > 0
 
 
@@ -149,6 +166,28 @@ def get_plan(plan_id: int) -> dict | None:
         })
     return {"id": plan["id"], "prompt": plan["prompt"], "servings": plan["servings"],
             "created_at": plan["created_at"], "meals": meals}
+
+
+def list_plans() -> list[dict]:
+    """Summaries of every plan, newest first."""
+    with connect() as conn:
+        plans = conn.execute("SELECT * FROM plans ORDER BY id DESC").fetchall()
+        meals = conn.execute(
+            """SELECT pm.plan_id, pm.day, pm.approved, r.title FROM plan_meals pm
+               JOIN recipes r ON r.id = pm.recipe_id ORDER BY pm.plan_id, pm.position"""
+        ).fetchall()
+    by_plan: dict[int, list] = {}
+    for m in meals:
+        by_plan.setdefault(m["plan_id"], []).append(
+            {"day": m["day"], "title": m["title"], "approved": bool(m["approved"])})
+    return [{"id": p["id"], "prompt": p["prompt"], "servings": p["servings"],
+             "created_at": p["created_at"], "meals": by_plan.get(p["id"], [])} for p in plans]
+
+
+def delete_plan(plan_id: int) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+    return cur.rowcount > 0
 
 
 def latest_plan_id() -> int | None:

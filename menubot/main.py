@@ -79,6 +79,11 @@ def create_plan(req: PlanRequest):
     return _llm_errors(planner.make_plan, days, req.prompt, req.servings)
 
 
+@app.get("/api/plans")
+def plans():
+    return db.list_plans()
+
+
 @app.get("/api/plans/latest")
 def latest_plan():
     plan_id = db.latest_plan_id()
@@ -88,6 +93,13 @@ def latest_plan():
 @app.get("/api/plans/{plan_id}")
 def get_plan(plan_id: int):
     return _require_plan(plan_id)
+
+
+@app.delete("/api/plans/{plan_id}")
+def delete_plan(plan_id: int):
+    if not db.delete_plan(plan_id):
+        raise HTTPException(404, "Plan not found")
+    return {"ok": True}
 
 
 @app.post("/api/plans/{plan_id}/meals/{day}/swap")
@@ -151,9 +163,13 @@ def import_recipe(req: ImportRequest):
 
 @app.delete("/api/recipes/{recipe_id}")
 def delete_recipe(recipe_id: int):
-    try:
-        if not db.delete_recipe(recipe_id):
-            raise HTTPException(404, "Recipe not found")
-    except ValueError as e:
-        raise HTTPException(409, str(e)) from e
+    if not db.delete_recipe(recipe_id):
+        raise HTTPException(404, "Recipe not found")
     return {"ok": True}
+
+
+@app.post("/api/recipes/{recipe_id}/restore")
+def restore_recipe(recipe_id: int):
+    if not db.restore_recipe(recipe_id):
+        raise HTTPException(404, "Recipe not found or not deleted")
+    return db.get_recipe(recipe_id)
