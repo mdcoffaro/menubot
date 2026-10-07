@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f3ec">
+  <title>Menubot</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Menubot</h1>
+    <span id="status" class="pill"></span>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="week" class="active">This week</button>
+    <button role="tab" data-tab="recipes">Recipes</button>
+  </nav>
+
+  <main>
+    <!-- ============ WEEK ============ -->
+    <section id="tab-week">
+      <form id="plan-form" class="card" hidden>
+        <h2>Plan dinners</h2>
+        <label class="label">Which nights are you cooking?</label>
+        <div id="day-chips" class="chips"></div>
+
+        <label class="label" for="servings">Servings per meal</label>
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="Fewer">−</button>
+          <input id="servings" type="number" min="1" max="12" value="2" inputmode="numeric">
+          <button type="button" data-step="1" aria-label="More">+</button>
+        </div>
+
+        <label class="label" for="prompt">Anything to keep in mind?</label>
+        <textarea id="prompt" rows="4" placeholder="e.g. No chicken this week, keep it mostly vegetarian, salmon is ok for one meal. I want teriyaki salmon on Monday."></textarea>
+
+        <button type="submit" class="primary big">Plan my week</button>
+        <button type="button" id="cancel-new" class="link" hidden>Back to current plan</button>
+      </form>
+
+      <div id="plan-view" hidden>
+        <div class="plan-head">
+          <div>
+            <h2>Your week</h2>
+            <p id="plan-progress" class="muted"></p>
+          </div>
+          <button id="new-plan" class="ghost">New plan</button>
+        </div>
+        <p id="plan-prompt" class="quote"></p>
+        <div id="meals"></div>
+        <button id="to-shopping" class="primary big" disabled>Make shopping list</button>
+        <p id="shopping-hint" class="muted center">Approve every meal to make the list.</p>
+      </div>
+
+      <div id="shopping-view" hidden>
+        <div class="plan-head">
+          <h2>Shopping list</h2>
+          <button id="back-to-plan" class="ghost">Back to meals</button>
+        </div>
+        <div class="row gap">
+          <button id="copy-list" class="ghost">Copy as text</button>
+          <button id="share-list" class="ghost" hidden>Share</button>
+        </div>
+        <div id="shopping"></div>
+      </div>
+    </section>
+
+    <!-- ============ RECIPES ============ -->
+    <section id="tab-recipes" hidden>
+      <form id="import-form" class="card">
+        <h2>Add a recipe</h2>
+        <div class="seg">
+          <button type="button" data-mode="url" class="active">From a link</button>
+          <button type="button" data-mode="text">Paste text</button>
+        </div>
+        <input id="import-url" type="url" placeholder="https://www.example.com/some-recipe">
+        <textarea id="import-text" rows="6" placeholder="Paste the full recipe (ingredients and steps). Handy for paywalled sites." hidden></textarea>
+        <button type="submit" class="primary">Add recipe</button>
+      </form>
+
+      <input id="search" type="search" placeholder="Search recipes, ingredients, tags…">
+      <p id="recipe-count" class="muted"></p>
+      <div id="recipe-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <template id="meal-tpl">
+    <article class="meal card">
+      <div class="meal-top">
+        <span class="day"></span>
+        <span class="check" aria-hidden="true">✓</span>
+      </div>
+      <h3 class="title"></h3>
+      <p class="meta muted"></p>
+      <p class="reason"></p>
+      <div class="actions">
+        <button class="approve">Looks good</button>
+        <button class="swap ghost">Swap</button>
+        <button class="details-btn link">Recipe</button>
+      </div>
+      <form class="swap-form" hidden>
+        <input type="text" placeholder="What would you rather have? (optional)">
+        <button type="submit" class="primary">Find another</button>
+      </form>
+      <div class="details" hidden></div>
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
